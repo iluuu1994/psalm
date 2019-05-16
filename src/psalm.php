@@ -6,6 +6,8 @@ use Psalm\Internal\Analyzer\ProjectAnalyzer;
 use Psalm\Internal\Provider;
 use Psalm\Config;
 use Psalm\IssueBuffer;
+use Psalm\Progress\DebugProgress;
+use Psalm\Progress\VoidProgress;
 
 // show all errors
 error_reporting(-1);
@@ -89,16 +91,22 @@ array_map(
                 && !in_array($arg_name . ':', $valid_long_options)
                 && !in_array($arg_name . '::', $valid_long_options)
             ) {
-                echo 'Unrecognised argument "--' . $arg_name . '"' . PHP_EOL
-                    . 'Type --help to see a list of supported arguments'. PHP_EOL;
+                fwrite(
+                    STDERR,
+                    'Unrecognised argument "--' . $arg_name . '"' . PHP_EOL
+                    . 'Type --help to see a list of supported arguments'. PHP_EOL
+                );
                 exit(1);
             }
         } elseif (substr($arg, 0, 2) === '-' && $arg !== '-' && $arg !== '--') {
             $arg_name = preg_replace('/=.*$/', '', substr($arg, 1));
 
             if (!in_array($arg_name, $valid_short_options) && !in_array($arg_name . ':', $valid_short_options)) {
-                echo 'Unrecognised argument "-' . $arg_name . '"' . PHP_EOL
-                    . 'Type --help to see a list of supported arguments'. PHP_EOL;
+                fwrite(
+                    STDERR,
+                    'Unrecognised argument "-' . $arg_name . '"' . PHP_EOL
+                    . 'Type --help to see a list of supported arguments'. PHP_EOL
+                );
                 exit(1);
             }
         }
@@ -133,11 +141,12 @@ if (isset($options['config'])) {
 }
 
 if (isset($options['c']) && is_array($options['c'])) {
-    echo 'Too many config files provided' . PHP_EOL;
+    fwrite(STDERR, 'Too many config files provided' . PHP_EOL);
     exit(1);
 }
 
 if (array_key_exists('h', $options)) {
+    // FIXME: stdout or stderr?
     echo <<<HELP
 Usage:
     psalm [options] [file...]
@@ -254,7 +263,7 @@ HELP;
 }
 
 if (getcwd() === false) {
-    echo 'Cannot get current working directory' . PHP_EOL;
+    fwrite(STDERR, 'Cannot get current working directory' . PHP_EOL);
     exit(1);
 }
 
@@ -268,7 +277,10 @@ if (isset($options['r']) && is_string($options['r'])) {
     $root_path = realpath($options['r']);
 
     if (!$root_path) {
-        echo 'Could not locate root directory ' . $current_dir . DIRECTORY_SEPARATOR . $options['r'] . PHP_EOL;
+        fwrite(
+            STDERR,
+            'Could not locate root directory ' . $current_dir . DIRECTORY_SEPARATOR . $options['r'] . PHP_EOL
+        );
         exit(1);
     }
 
@@ -280,6 +292,7 @@ $vendor_dir = getVendorDir($current_dir);
 $first_autoloader = requireAutoloaders($current_dir, isset($options['r']), $vendor_dir);
 
 if (array_key_exists('v', $options)) {
+    // FIXME: stdout or stderr?
     echo 'Psalm ' . PSALM_VERSION . PHP_EOL;
     exit;
 }
@@ -396,7 +409,7 @@ $path_to_config = isset($options['c']) && is_string($options['c']) ? realpath($o
 
 if ($path_to_config === false) {
     /** @psalm-suppress InvalidCast */
-    echo 'Could not resolve path to config ' . (string)$options['c'] . PHP_EOL;
+    fwrite(STDERR, 'Could not resolve path to config ' . (string)$options['c'] . PHP_EOL);
     exit(1);
 }
 
@@ -432,7 +445,7 @@ try {
         $config = Config::getConfigForPath($current_dir, $current_dir, $output_format);
     }
 } catch (Psalm\Exception\ConfigException $e) {
-    echo $e->getMessage() . PHP_EOL;
+    fwrite(STDERR, $e->getMessage() . PHP_EOL);
     exit(1);
 }
 
@@ -455,6 +468,7 @@ if (isset($options['clear-cache'])) {
     $cache_directory = $config->getCacheDirectory();
 
     Config::removeCacheDirectory($cache_directory);
+    // FIXME: stdout or stderr?
     echo 'Cache directory deleted' . PHP_EOL;
     exit;
 }
@@ -464,6 +478,7 @@ if (isset($options['clear-global-cache'])) {
 
     if ($cache_directory) {
         Config::removeCacheDirectory($cache_directory);
+        // FIXME: stdout or stderr?
         echo 'Global cache directory deleted' . PHP_EOL;
     }
 
@@ -471,6 +486,9 @@ if (isset($options['clear-global-cache'])) {
 }
 
 $debug = array_key_exists('debug', $options) || array_key_exists('debug-by-line', $options);
+$progress = $debug
+    ? new DebugProgress()
+    : new VoidProgress();
 
 if (isset($options['no-cache'])) {
     $providers = new Provider\Providers(
@@ -503,7 +521,7 @@ $project_analyzer = new ProjectAnalyzer(
     $show_info,
     $output_format,
     $threads,
-    $debug,
+    $progress,
     isset($options['report']) && is_string($options['report']) ? $options['report'] : null,
     !isset($options['show-snippet']) || $options['show-snippet'] !== "false"
 );
@@ -525,13 +543,11 @@ if ($type_map_location) {
 
 $start_time = microtime(true);
 
-$config->visitComposerAutoloadFiles($project_analyzer, $debug);
+$config->visitComposerAutoloadFiles($project_analyzer, $progress);
 
 $now_time = microtime(true);
 
-if ($debug) {
-    echo 'Visiting autoload files took ' . number_format($now_time - $start_time, 3) . 's' . "\n";
-}
+$progress->debug('Visiting autoload files took ' . number_format($now_time - $start_time, 3) . 's' . "\n");
 
 if (array_key_exists('debug-by-line', $options)) {
     $project_analyzer->debug_lines = true;
@@ -571,11 +587,9 @@ if ($find_references_to) {
 
 if (isset($options['set-baseline']) && is_string($options['set-baseline'])) {
     if ($is_diff) {
-        if ($output_format === ProjectAnalyzer::TYPE_CONSOLE) {
-            echo 'Cannot set baseline in --diff mode' . PHP_EOL;
-        }
+        fwrite(STDERR, 'Cannot set baseline in --diff mode' . PHP_EOL);
     } else {
-        echo 'Writing error baseline to file...', PHP_EOL;
+        fwrite(STDERR, 'Writing error baseline to file...' . PHP_EOL);
 
         ErrorBaseline::create(
             new \Psalm\Internal\Provider\FileProvider,
@@ -583,7 +597,7 @@ if (isset($options['set-baseline']) && is_string($options['set-baseline'])) {
             IssueBuffer::getIssuesData()
         );
 
-        echo "Baseline saved to {$options['set-baseline']}.";
+        fwrite(STDERR, "Baseline saved to {$options['set-baseline']}.");
 
         /** @var string $configFile */
         $configFile = Config::locateConfigFile($path_to_config ?? $current_dir);
@@ -599,7 +613,7 @@ if (isset($options['set-baseline']) && is_string($options['set-baseline'])) {
             $endPsalmOpenTag = strpos($configFileContents, '>', (int)strpos($configFileContents, '<psalm'));
 
             if (!$endPsalmOpenTag) {
-                echo " Don't forget to set errorBaseline=\"{$options['set-baseline']}\" in your config.";
+                fwrite(STDERR, " Don't forget to set errorBaseline=\"{$options['set-baseline']}\" in your config.");
             } elseif ($configFileContents[$endPsalmOpenTag - 1] === "\n") {
                 $amendedConfigFileContents = substr_replace(
                     $configFileContents,
@@ -619,7 +633,7 @@ if (isset($options['set-baseline']) && is_string($options['set-baseline'])) {
 
         file_put_contents($configFile, $amendedConfigFileContents);
 
-        echo PHP_EOL;
+        fwrite(STDERR, PHP_EOL);
     }
 }
 
@@ -627,9 +641,7 @@ $issue_baseline = [];
 
 if (isset($options['update-baseline'])) {
     if ($is_diff) {
-        if ($output_format === ProjectAnalyzer::TYPE_CONSOLE) {
-            echo 'Cannot update baseline in --diff mode' . PHP_EOL;
-        }
+        fwrite(STDERR, 'Cannot update baseline in --diff mode' . PHP_EOL);
     } else {
         $baselineFile = Config::getInstance()->error_baseline;
 
@@ -654,11 +666,13 @@ if (isset($options['update-baseline'])) {
             $total_fixed_issues = $total_issues_current_baseline - $total_issues_updated_baseline;
 
             if ($total_fixed_issues > 0) {
+                // FIXME: stdout or stderr?
                 echo str_repeat('-', 30) . "\n";
                 echo $total_fixed_issues . ' errors fixed' . "\n";
             }
         } catch (\Psalm\Exception\ConfigException $exception) {
-            die('Could not update baseline file: ' . $exception->getMessage());
+            fwrite(STDERR, 'Could not update baseline file: ' . $exception->getMessage() . PHP_EOL);
+            exit(1);
         }
     }
 }
