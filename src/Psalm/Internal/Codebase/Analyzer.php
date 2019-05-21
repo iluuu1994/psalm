@@ -292,7 +292,8 @@ class Analyzer
                         'class_method_locations' => $file_reference_provider->getAllClassMethodLocations(),
                         'class_property_locations' => $file_reference_provider->getAllClassPropertyLocations(),
                     ];
-                }
+                },
+                $this->progress
             );
 
             $this->progress->debug('Forking analysis' . "\n");

@@ -5,6 +5,7 @@ use Psalm\Internal\Analyzer\ProjectAnalyzer;
 use Psalm\Config;
 use Psalm\IssueBuffer;
 use Psalm\Progress\DebugProgress;
+use Psalm\Progress\DotsProgress;
 use Psalm\Progress\VoidProgress;
 
 // show all errors
@@ -193,7 +194,7 @@ $providers = new Psalm\Internal\Provider\Providers(
 $debug = array_key_exists('debug', $options);
 $progress = $debug
     ? new DebugProgress()
-    : new VoidProgress();
+    : new DotsProgress();
 
 $project_analyzer = new ProjectAnalyzer(
     $config,

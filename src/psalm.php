@@ -7,6 +7,7 @@ use Psalm\Internal\Provider;
 use Psalm\Config;
 use Psalm\IssueBuffer;
 use Psalm\Progress\DebugProgress;
+use Psalm\Progress\DotsProgress;
 use Psalm\Progress\VoidProgress;
 
 // show all errors
@@ -488,7 +489,7 @@ if (isset($options['clear-global-cache'])) {
 $debug = array_key_exists('debug', $options) || array_key_exists('debug-by-line', $options);
 $progress = $debug
     ? new DebugProgress()
-    : new VoidProgress();
+    : new DotsProgress();
 
 if (isset($options['no-cache'])) {
     $providers = new Provider\Providers(

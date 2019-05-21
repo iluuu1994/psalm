@@ -429,7 +429,8 @@ class Scanner
                             ? $statements_provider->parser_cache_provider->getNewFileContentHashes()
                             : [],
                     ];
-                }
+                },
+                $this->progress
             );
 
             // Wait for all tasks to complete and collect the results.

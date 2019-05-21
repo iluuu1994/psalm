@@ -36,4 +36,22 @@ abstract class Progress
         // FIXME: Should be stderr
         echo 'Analyzing files...' . "\n";
     }
+
+    /**
+     * @param string $filePath
+     *
+     * @return void
+     */
+    public function endScanningFile(string $filePath)
+    {
+    }
+
+    /**
+     * @param string $filePath
+     *
+     * @return void
+     */
+    public function endAnalyzingFile(string $filePath)
+    {
+    }
 }

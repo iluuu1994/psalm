@@ -1,6 +1,8 @@
 <?php
 namespace Psalm\Internal\Fork;
 
+use Psalm\Progress\Progress;
+
 /**
  * Adapted with relatively few changes from
  * https://github.com/etsy/phan/blob/1ccbe7a43a6151ca7c0759d6c53e2c3686994e53/src/Phan/ForkPool.php
@@ -24,6 +26,9 @@ class Pool
     /** @var bool */
     private $did_have_error = false;
 
+    /** @var Progress */
+    private $progress;
+
     /**
      * @param array[] $process_task_data_iterator
      * An array of task data items to be divided up among the
@@ -42,8 +47,10 @@ class Pool
         array $process_task_data_iterator,
         \Closure $startup_closure,
         \Closure $task_closure,
-        \Closure $shutdown_closure
+        \Closure $shutdown_closure,
+        Progress $progress
     ) {
+        $this->progress = $progress;
         $pool_size = count($process_task_data_iterator);
 
         \assert(
@@ -124,6 +131,7 @@ class Pool
         $task_data_iterator = array_values($process_task_data_iterator)[$proc_id];
         foreach ($task_data_iterator as $i => $task_data) {
             $task_closure($i, $task_data);
+            fwrite($write_stream, base64_encode(serialize(new ForkTaskDoneMessage(['hello' => $i]))) . PHP_EOL);
         }
 
         // Execute each child's shutdown closure before
@@ -131,7 +139,7 @@ class Pool
         $results = $shutdown_closure();
 
         // Serialize this child's produced results and send them to the parent.
-        fwrite($write_stream, serialize($results ?: []));
+        fwrite($write_stream, base64_encode(serialize(new ForkTerminationMessage($results ?: []))) . PHP_EOL);
 
         fclose($write_stream);
 
@@ -205,7 +213,10 @@ class Pool
 
         // Create an array for the content received on each stream,
         // indexed by resource id.
+        /** @var array<int, string> $content */
         $content = array_fill_keys(array_keys($streams), '');
+
+        $terminationMessages = [];
 
         // Read the data off of all the stream.
         while (count($streams) > 0) {
@@ -227,6 +238,21 @@ class Pool
                     $content[intval($file)] .= $buffer;
                 }
 
+                if (strpos($buffer, PHP_EOL) === strlen($buffer) - 1) {
+                    $serializedMessage = $content[intval($file)];
+                    $content[intval($file)] = '';
+                    $message = unserialize(base64_decode($serializedMessage));
+
+                    if ($message instanceof ForkTerminationMessage) {
+                        $terminationMessages[] = $message->data;
+                    } elseif ($message instanceof ForkTaskDoneMessage) {
+                        $this->progress->endScanningFile('test');
+                    } else {
+                        error_log('Child should return ForkMessage - response type=' . gettype($message));
+                        $this->did_have_error = true;
+                    }
+                }
+
                 // If the stream has closed, stop trying to select on it.
                 if (feof($file)) {
                     fclose($file);
@@ -235,30 +261,7 @@ class Pool
             }
         }
 
-        // Unmarshal the content into its original form.
-        return array_values(
-            array_map(
-                /**
-                 * @param string $data
-                 *
-                 * @return array
-                 */
-                function ($data) {
-                    /** @var array */
-                    $result = unserialize($data);
-                    /** @psalm-suppress DocblockTypeContradiction */
-                    if (!\is_array($result)) {
-                        error_log(
-                            'Child terminated without returning a serialized array - response type=' . gettype($result)
-                        );
-                        $this->did_have_error = true;
-                    }
-
-                    return $result;
-                },
-                $content
-            )
-        );
+        return array_values($terminationMessages);
     }
 
     /**
